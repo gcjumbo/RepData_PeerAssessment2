@@ -1,0 +1,188 @@
+---
+title: "Reproducible Research: Peer Assessment 2"
+author: "Jarren Santos"
+date: "2/20/2017"
+output: html_document
+    keep_md: true
+---
+
+# Fatalities, Injuries, and a Bit of Rain: A Simple Analysis
+
+
+## Synopsis
+
+Storms and other severe weather events can cause problems in a variety sectors.  In public health, communities are often left in an uninhabitable state where families and individuals may struggle to obtain access to resources they had once before.  In economics, storms wipe out much of the supply for materials and resources, which negatively impacts the market of an entire area or region.  In either case, severe events like storms may cause fatalities in the form of injuries, deaths, or property damage.  Using the NOAA Storm Database, we wish to answer two different questions:
+
+1. Across the United States, which types of events are most harmful with respect to population health (see `EVTYPE` variable)?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+By analyzing the information available on the NOAA Storm Database, we can get an idea of how storms and fatal events are related.
+
+
+## Setup
+
+Set your working directory to wherever your work is going to be placed in and where you are sourcing your data from.
+```{r}
+setwd("~/Documents/Grinnell College/04_Spring 2017/MAT-397 (Adv Data Sci)/Coursera/05_Reproducible Research/Week 04")
+```
+
+You will need to have the following packages installed:
+
+* `readr` package: Allows you to read in data more efficiently
+
+```{r}
+require(readr)
+require(plyr)
+require(dplyr)
+require(ggplot2)
+require(gridExtra)
+```
+
+
+## Data Processing
+
+We'll load in the Storms database.  If you do not have the Storms database on your local computer, you can click [this link](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) to download it.  NA strings are recorded as blank values, so we specify that with the `na` argument. 
+
+When reading data in, I like to use the `read_csv()` function from the `readr` package.  However, feel free to use the base package's `read.csv()` function.  `readcsv()` allows for more efficient processing when loading data into R.
+
+```{r, cache = TRUE}
+storms <- read_csv("repdata%2Fdata%2FStormData.csv.bz2", na = c(""))
+```
+
+Let's preview the data so we can capture a quick glimpse of what it contains.
+```{r}
+str(storms)
+head(storms)
+```
+
+Now that we have our data loaded in, we can analylze our data with regards to our question.
+
+
+## Data Wrangling
+
+Let's get an idea of the data that we are working with.  We saw in the `str(storms)` command the structure of each of those variables along with their names.  The variables we probably will be most concerned with are:
+
+* STATE
+* EVTYPE
+* FATALATIES
+* INJURIES
+* PROPDMG
+* PROPDMGEXP
+* CROPDMG
+* CROPDMGEXP
+
+Let's change our dataset up a bit by selecting only the variables of our interest.
+```{r}
+storms <- select(storms, STATE, EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+```
+
+We can obtain a five-number summary for each of the quantitative variables by using the `summary()` command.
+```{r}
+summary(storms$FATALITIES)
+summary(storms$INJURIES)
+summary(storms$PROPDMG)
+summary(storms$CROPDMG)
+```
+
+Note how the median for each of these values lie at 0, so let's go ahead and limit our analysis to any events where we see at least one instance occur.
+```{r}
+storms <- filter(storms, FATALITIES > 0 | INJURIES > 0 | PROPDMG > 0 | CROPDMG > 0)
+```
+
+Something that the course mentor describes in the forum is the `PROPDMGEXP` and `CROPDMGEXP` variables.  In here, they provide the following note:
+
+> The 'CROPDMGEXP' is the exponent values for 'CROPDMG' (crop damage). In the same way, 'PROPDMGEXP' is the exponent values for 'PROPDMG' (property damage). You should use both to get the total values for crops and property damage. (B or b = Billion, M or m = Million, K or k = Thousand, H or h = Hundred). The number from one to ten represent the power of ten (10^The number). The symbols "-", "+" and "?" refers to less than, greater than and low certainty. You have the option to ignore these three symbols altogether. Also, there is a nice work entitled: How To Handle Exponent Value of PROPDMGEXP and CROPDMGEXP. It discusses that issue in more depth.
+
+That means we should change the values of `PROPDMG` and `CROPDMG` by the values listed in the `PROPDMGEXP` and `CROPDMGEXP` columns.  Let's go ahead and do that now.
+```{r}
+storms$PROPDMGEXP <- as.numeric(storms$PROPDMGEXP)
+storms$PROPDMGEXP[is.na(storms$PROPDMGEXP)] <- 1    # A number raised to the power of 1 is still the 
+                                                    # original number, so this takes care of any NAs
+storms$PROPDMG <- storms$PROPDMG ^ storms$PROPDMGEXP
+
+storms$CROPDMGEXP <- as.numeric(storms$CROPDMGEXP)
+storms$CROPDMGEXP[is.na(storms$CROPDMGEXP)] <- 1    # A number raised to the power of 1 is still the 
+                                                    # original number, so this takes care of any NAs
+storms$CROPDMG <- storms$CROPDMG ^ storms$CROPDMGEXP
+```
+
+Now that we have (somewhat) cleaned up the quantitative variables, let's go ahead and start creating some plots that help address our questions.  
+
+
+## Results
+
+### Answering the First Question
+
+To remind ourselves of the first question, I've pasted it below so you do not have to scroll up:
+
+1. Across the United States, which types of events are most harmful with respect to population health (see `EVTYPE` variable)?
+
+Let's go ahead and create a table of the totals for fatalities and injuries.  We'll create a table and graph that corresponds with the top 10 events that cause the most harm with respect to population health when looking at total fatalities and injuries.
+
+Let's deal with fatalities first.
+```{r}
+storms.pop <- plyr::ddply(storms, plyr::.(EVTYPE), summarize, TotalFatalities = sum(FATALITIES), TotalInjuries = sum(INJURIES))
+
+storms.fatal <- arrange(storms.pop, desc(TotalFatalities))
+head(storms.fatal, 10)  # Figure out what the top 10 events are
+storms.fatal <- filter(storms.fatal, TotalFatalities >=224)
+
+fatal <- ggplot(data = storms.fatal, aes(x=EVTYPE, y=TotalFatalities)) + geom_boxplot()  + aes(colour=EVTYPE) + theme(legend.position="right") + labs(title="") 
+```
+
+Then we can deal with injuries.
+```{r}
+storms.injure <- arrange(storms.pop, desc(TotalInjuries))
+head(storms.injure, 10)  # Figure out what the top 10 events are
+storms.injure <- filter(storms.injure, TotalInjuries >=1361)
+
+injury <- ggplot(data = storms.injure, aes(x=EVTYPE, y=TotalInjuries)) + geom_boxplot()  + aes(colour=EVTYPE) + theme(legend.position="right") + labs(title="") 
+```
+
+Let's go ahead and see what these two graphs look like in one figure.
+```{r}
+fig1 <- grid.arrange(fatal, injury, ncol = 2)
+fig1
+```
+
+We can conduct a very simple analysis based on our graphs.  We see that `TORNADOS` cause the highest total number of fatalities across the United States (both contiguous and non-contiguous).  This is then followed by other events such as `FLOODS` and `EXCESSIVE HEAT`.  We see that `TORNADOS` also cause the highest total number of injuries across thee U.S.  This is then followed by other events such as `HAIL` and `FLASH FLOOD`.  There are many more injuries than fatalaties across the board.
+
+### Answering the Second Question
+
+To remind ourselves of the second question, I've pasted it below so you do not have to scroll up:
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+Let's go ahead and create a table of the totals for property damage and crop damage.  We'll create a table and graph that corresponds with the top 10 events that cause the most harm with respect to the economy when looking at greatest economic consequences.
+
+Let's deal with property damage first.
+```{r}
+storms.econ <- plyr::ddply(storms, plyr::.(EVTYPE), summarize, TotalProp = sum(PROPDMG), TotalCrop = sum(CROPDMG))
+
+storms.prop <- arrange(storms.econ, desc(TotalProp))
+head(storms.prop, 11)  # Figure out what the top 11 events are
+storms.prop <- filter(storms.prop, TotalProp > 1.222655e+05)    # use 11th highest value as cutoff
+
+property <- ggplot(data = storms.prop, aes(x=EVTYPE, y=log(TotalProp))) + geom_boxplot()  + aes(colour=EVTYPE) + theme(legend.position="right") + labs(title="") 
+```
+
+Then let's deal with crop damage.
+```{r}
+storms.crop <- arrange(storms.econ, desc(TotalCrop))
+head(storms.crop, 11)  # Figure out what the top 11 events are
+storms.crop <- filter(storms.crop, TotalCrop > 7034.14)    # use 11th highest value as cutoff
+
+croperty <- ggplot(data = storms.crop, aes(x=EVTYPE, y=log(TotalCrop))) + geom_boxplot()  + aes(colour=EVTYPE) + theme(legend.position="right") + labs(title="")     # lol croperty
+```
+
+Let's go ahead and see what these two graphs look like in one figure.
+```{r}
+fig2 <- grid.arrange(property, croperty, ncol = 2)
+fig2
+```
+
+We can conduct a very simple analysis based on our graphs.  We see that `FLASH FLOOD` cause the highest total property damage across the United States (both contiguous and non-contiguous).  This is then followed by other events such as `TORNADO` and `WINTER STORM`.  We see that `HAIL` cause the highest total crop damage across thee U.S.  This is then followed by other events such as `DROUGHT` and `HIGH WIND`.  Much more damage is done unto property than unto crops across the board.
+
+Overall, we can say that weather can play a nasty game with humans and the market.  As it currently stands, the U.S. isn't paying much attention to the environment and developing public health initiatives and policy focusing on such matters, so perhaps that should be our next call to action.
+
+I will admit that this is somewhat of a shallow analysis, but if allotted more time to complete and analyze this, then I would be able to determine other patterns that we may be missing with regards to natural weather events and fatal events.
